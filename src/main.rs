@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fmt;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Parser)]
@@ -21,6 +22,8 @@ enum Commands {
     },
     /// List todo items
     List,
+    /// Show the todo data file path
+    Path,
     /// Mark a todo item as done
     Done {
         /// The id of the todo item to mark as done
@@ -30,9 +33,16 @@ enum Commands {
     Remove {
         /// The id of the todo item to remove
         id: u32,
+        /// Skip interactive confirmation prompts
+        #[arg(long)]
+        yes: bool,
     },
     /// Clear all todo items
-    Clear,
+    Clear {
+        /// Skip interactive confirmation prompts
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +98,9 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
                 }
             }
         }
+        Commands::Path => {
+            println!("{}", store_path.display());
+        }
         Commands::Done { id } => {
             let todo = todos.iter_mut().find(|item| item.id == id);
             match todo {
@@ -99,7 +112,11 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
                 None => return Err(format!("todo #{id} not found")),
             }
         }
-        Commands::Remove { id } => {
+        Commands::Remove { id, yes } => {
+            if !yes {
+                confirm_deletion(&format!("todo #{id}"))?;
+            }
+
             let initial_len = todos.len();
             todos.retain(|item| item.id != id);
             if todos.len() == initial_len {
@@ -108,7 +125,11 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
             save_todos(store_path, &todos)?;
             println!("Removed todo #{id}");
         }
-        Commands::Clear => {
+        Commands::Clear { yes } => {
+            if !yes {
+                confirm_deletion("all todos")?;
+            }
+
             todos.clear();
             save_todos(store_path, &todos)?;
             println!("Cleared all todos");
@@ -123,9 +144,56 @@ fn todo_store_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".rtodo.json")
+    let home = user_home_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    home.join(".rtodo").join("todos.json")
+}
+
+fn user_home_dir() -> Option<PathBuf> {
+    if let Some(home) = env::var_os("HOME") {
+        return Some(PathBuf::from(home));
+    }
+
+    if let Some(user_profile) = env::var_os("USERPROFILE") {
+        return Some(PathBuf::from(user_profile));
+    }
+
+    let home_drive = env::var_os("HOMEDRIVE")?;
+    let home_path = env::var_os("HOMEPATH")?;
+
+    let mut path = PathBuf::from(home_drive);
+    path.push(home_path);
+    Some(path)
+}
+
+fn confirm_deletion(target: &str) -> Result<(), String> {
+    if !ask_confirm(&format!("Delete {target}? (y/N): "))? {
+        return Err("aborted: deletion canceled".to_string());
+    }
+
+    if !ask_confirm("Please confirm again, type y to proceed (y/N): ")? {
+        return Err("aborted: deletion canceled".to_string());
+    }
+
+    Ok(())
+}
+
+fn ask_confirm(prompt: &str) -> Result<bool, String> {
+    print!("{prompt}");
+    io::stdout()
+        .flush()
+        .map_err(|err| format!("failed to flush stdout: {err}"))?;
+
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|err| format!("failed to read confirmation: {err}"))?;
+
+    Ok(matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 fn load_todos(store_path: &Path) -> Result<Vec<TodoItem>, String> {
@@ -144,8 +212,12 @@ fn load_todos(store_path: &Path) -> Result<Vec<TodoItem>, String> {
 }
 
 fn save_todos(store_path: &Path, todos: &[TodoItem]) -> Result<(), String> {
+    if let Some(parent) = store_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create {:?}: {err}", parent))?;
+    }
+
     let json = serde_json::to_string_pretty(todos)
         .map_err(|err| format!("failed to serialize todos: {err}"))?;
-    fs::write(store_path, json)
-        .map_err(|err| format!("failed to write {:?}: {err}", store_path))
+    fs::write(store_path, json).map_err(|err| format!("failed to write {:?}: {err}", store_path))
 }

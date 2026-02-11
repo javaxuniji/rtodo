@@ -22,6 +22,8 @@ enum Commands {
     },
     /// List todo items
     List,
+    /// Show the todo data file path
+    Path,
     /// Mark a todo item as done
     Done {
         /// The id of the todo item to mark as done
@@ -96,6 +98,9 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
                 }
             }
         }
+        Commands::Path => {
+            println!("{}", store_path.display());
+        }
         Commands::Done { id } => {
             let todo = todos.iter_mut().find(|item| item.id == id);
             match todo {
@@ -139,11 +144,27 @@ fn todo_store_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
+    let home = user_home_dir()
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     home.join(".rtodo").join("todos.json")
+}
+
+fn user_home_dir() -> Option<PathBuf> {
+    if let Some(home) = env::var_os("HOME") {
+        return Some(PathBuf::from(home));
+    }
+
+    if let Some(user_profile) = env::var_os("USERPROFILE") {
+        return Some(PathBuf::from(user_profile));
+    }
+
+    let home_drive = env::var_os("HOMEDRIVE")?;
+    let home_path = env::var_os("HOMEPATH")?;
+
+    let mut path = PathBuf::from(home_drive);
+    path.push(home_path);
+    Some(path)
 }
 
 fn confirm_deletion(target: &str) -> Result<(), String> {

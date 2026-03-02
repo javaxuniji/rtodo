@@ -19,15 +19,25 @@ enum Commands {
     Add {
         /// The text of the todo item
         text: Vec<String>,
+        /// Add a note to the todo item
+        #[arg(long)]
+        note: Option<String>,
     },
     /// List todo items
-    List,
+    List {
+        /// Show all todo items (including completed ones)
+        #[arg(long)]
+        all: bool,
+    },
     /// Show the todo data file path
     Path,
     /// Mark a todo item as done
     Done {
         /// The id of the todo item to mark as done
         id: u32,
+        /// Add a note when marking as done
+        #[arg(long)]
+        note: Option<String>,
     },
     /// Remove a todo item
     Remove {
@@ -43,6 +53,8 @@ enum Commands {
         #[arg(long)]
         yes: bool,
     },
+    /// Show version information
+    Version,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,12 +62,18 @@ struct TodoItem {
     id: u32,
     text: String,
     done: bool,
+    #[serde(default)]
+    note: Option<String>,
 }
 
 impl fmt::Display for TodoItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status = if self.done { "x" } else { " " };
-        write!(f, "[{}] {}: {}", status, self.id, self.text)
+        write!(f, "[{}] {}: {}", status, self.id, self.text)?;
+        if let Some(note) = &self.note {
+            write!(f, " ({})", note)?;
+        }
+        Ok(())
     }
 }
 
@@ -73,7 +91,7 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
     let mut todos = load_todos(store_path)?;
 
     match command {
-        Commands::Add { text } => {
+        Commands::Add { text, note } => {
             let description = text.join(" ").trim().to_string();
             if description.is_empty() {
                 return Err("todo text cannot be empty".to_string());
@@ -84,28 +102,34 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
                 id: next_id,
                 text: description,
                 done: false,
+                note,
             };
             todos.push(item);
             save_todos(store_path, &todos)?;
             println!("Added todo #{next_id}");
         }
-        Commands::List => {
+        Commands::List { all } => {
             if todos.is_empty() {
                 println!("No todos yet.");
             } else {
                 for todo in todos {
-                    println!("{todo}");
+                    if all || !todo.done {
+                        println!("{todo}");
+                    }
                 }
             }
         }
         Commands::Path => {
             println!("{}", store_path.display());
         }
-        Commands::Done { id } => {
+        Commands::Done { id, note } => {
             let todo = todos.iter_mut().find(|item| item.id == id);
             match todo {
                 Some(item) => {
                     item.done = true;
+                    if let Some(n) = note {
+                        item.note = Some(n);
+                    }
                     save_todos(store_path, &todos)?;
                     println!("Marked todo #{id} as done");
                 }
@@ -133,6 +157,9 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
             todos.clear();
             save_todos(store_path, &todos)?;
             println!("Cleared all todos");
+        }
+        Commands::Version => {
+            println!("rtodo version {}", env!("CARGO_PKG_VERSION"));
         }
     }
 

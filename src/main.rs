@@ -178,6 +178,18 @@ fn todo_store_path() -> PathBuf {
 }
 
 fn user_home_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        if let Some(user_profile) = env::var_os("USERPROFILE") {
+            return Some(PathBuf::from(user_profile));
+        }
+
+        let home_drive = env::var_os("HOMEDRIVE")?;
+        let home_path = env::var_os("HOMEPATH")?;
+        let mut path = PathBuf::from(home_drive);
+        path.push(home_path);
+        return Some(path);
+    }
+
     if let Some(home) = env::var_os("HOME") {
         return Some(PathBuf::from(home));
     }

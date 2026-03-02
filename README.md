@@ -18,5 +18,5 @@ cargo run -- clear --yes       # skips confirmation
 ### Data storage
 
 By default todos are stored in the user home directory at `~/.rtodo/todos.json`
-(on Windows, home is resolved from `USERPROFILE` or `HOMEDRIVE` + `HOMEPATH`).
+(on Windows, prefers USERPROFILE/HOMEDRIVE+HOMEPATH over HOME to avoid shell-variable mismatch).
 Override this with the `RTODO_FILE` environment variable.

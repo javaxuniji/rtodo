@@ -5,6 +5,7 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Parser)]
 #[command(name = "rtodo", version, about = "A simple todo CLI")]
@@ -22,6 +23,10 @@ enum Commands {
         /// Add a note to the todo item
         #[arg(long)]
         note: Option<String>,
+        #[arg(short = 'p', long, default_value = "m", value_parser = parse_priority)]
+        priority: Priority,
+        #[arg(long = "at", alias = "time", value_parser = parse_added_at)]
+        at: Option<i64>,
     },
     /// List todo items
     List {
@@ -64,12 +69,44 @@ struct TodoItem {
     done: bool,
     #[serde(default)]
     note: Option<String>,
+    #[serde(default)]
+    priority: Priority,
+    #[serde(default)]
+    added_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+enum Priority {
+    Low,
+    Medium,
+    High,
+}
+
+impl Default for Priority {
+    fn default() -> Self {
+        Priority::Medium
+    }
+}
+
+impl Priority {
+    fn short(self) -> char {
+        match self {
+            Priority::Low => 'l',
+            Priority::Medium => 'm',
+            Priority::High => 'h',
+        }
+    }
 }
 
 impl fmt::Display for TodoItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status = if self.done { "x" } else { " " };
         write!(f, "[{}] {}: {}", status, self.id, self.text)?;
+        write!(f, " [{}]", self.priority.short())?;
+        if self.added_at != 0 {
+            write!(f, " @{}", self.added_at)?;
+        }
         if let Some(note) = &self.note {
             write!(f, " ({})", note)?;
         }
@@ -91,18 +128,26 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
     let mut todos = load_todos(store_path)?;
 
     match command {
-        Commands::Add { text, note } => {
+        Commands::Add {
+            text,
+            note,
+            priority,
+            at,
+        } => {
             let description = text.join(" ").trim().to_string();
             if description.is_empty() {
                 return Err("todo text cannot be empty".to_string());
             }
 
             let next_id = todos.iter().map(|item| item.id).max().unwrap_or(0) + 1;
+            let added_at = at.unwrap_or_else(now_unix_seconds);
             let item = TodoItem {
                 id: next_id,
                 text: description,
                 done: false,
                 note,
+                priority,
+                added_at,
             };
             todos.push(item);
             save_todos(store_path, &todos)?;
@@ -112,6 +157,7 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
             if todos.is_empty() {
                 println!("No todos yet.");
             } else {
+                todos.sort_by_key(|todo| (todo.added_at, todo.id));
                 for todo in todos {
                     if all || !todo.done {
                         println!("{todo}");
@@ -259,4 +305,35 @@ fn save_todos(store_path: &Path, todos: &[TodoItem]) -> Result<(), String> {
     let json = serde_json::to_string_pretty(todos)
         .map_err(|err| format!("failed to serialize todos: {err}"))?;
     fs::write(store_path, json).map_err(|err| format!("failed to write {:?}: {err}", store_path))
+}
+
+fn parse_priority(value: &str) -> Result<Priority, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "l" | "low" => Ok(Priority::Low),
+        "m" | "med" | "medium" => Ok(Priority::Medium),
+        "h" | "hi" | "high" => Ok(Priority::High),
+        _ => Err("invalid priority: use low|l, medium|m, high|h".to_string()),
+    }
+}
+
+fn parse_added_at(value: &str) -> Result<i64, String> {
+    let v = value.trim().to_ascii_lowercase();
+    if v == "now" {
+        return Ok(now_unix_seconds());
+    }
+    let raw: i64 = v
+        .parse()
+        .map_err(|_| "invalid added time: use unix seconds, unix milliseconds, or \"now\"".to_string())?;
+    if raw >= 1_000_000_000_000 {
+        Ok(raw / 1000)
+    } else {
+        Ok(raw)
+    }
+}
+
+fn now_unix_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }

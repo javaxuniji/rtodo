@@ -6,6 +6,8 @@ a simple todo list cli
 
 ```bash
 cargo run -- add "buy milk"
+cargo run -- add -p h --at now "finish report"
+cargo run -- add --priority l --at 1710000000 "walk dog"
 cargo run -- list
 cargo run -- path              # print current todo storage file path
 cargo run -- done 1
@@ -14,6 +16,8 @@ cargo run -- remove 1 --yes    # skips confirmation
 cargo run -- clear             # asks for double confirmation
 cargo run -- clear --yes       # skips confirmation
 ```
+
+`list` 默认按添加时间（added time）正序展示。
 
 ### Data storage
 

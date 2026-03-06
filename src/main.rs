@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,6 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+    #[arg(long, default_value = "auto", global = true, value_parser = parse_color_mode)]
+    color: ColorMode,
 }
 
 #[derive(Debug, Subcommand)]
@@ -60,6 +62,13 @@ enum Commands {
     },
     /// Show version information
     Version,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorMode {
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,13 +127,13 @@ fn main() {
     let cli = Cli::parse();
     let store_path = todo_store_path();
 
-    if let Err(err) = handle_command(cli.command, &store_path) {
+    if let Err(err) = handle_command(cli.command, &store_path, cli.color) {
         eprintln!("Error: {err}");
         std::process::exit(1);
     }
 }
 
-fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
+fn handle_command(command: Commands, store_path: &Path, color: ColorMode) -> Result<(), String> {
     let mut todos = load_todos(store_path)?;
 
     match command {
@@ -157,10 +166,15 @@ fn handle_command(command: Commands, store_path: &Path) -> Result<(), String> {
             if todos.is_empty() {
                 println!("No todos yet.");
             } else {
+                let use_color = color_enabled(color);
                 todos.sort_by_key(|todo| (todo.added_at, todo.id));
                 for todo in todos {
                     if all || !todo.done {
-                        println!("{todo}");
+                        if use_color {
+                            println!("{}", format_todo_colored(&todo));
+                        } else {
+                            println!("{todo}");
+                        }
                     }
                 }
             }
@@ -307,6 +321,15 @@ fn save_todos(store_path: &Path, todos: &[TodoItem]) -> Result<(), String> {
     fs::write(store_path, json).map_err(|err| format!("failed to write {:?}: {err}", store_path))
 }
 
+fn parse_color_mode(value: &str) -> Result<ColorMode, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(ColorMode::Auto),
+        "always" => Ok(ColorMode::Always),
+        "never" => Ok(ColorMode::Never),
+        _ => Err("invalid color mode: use auto, always, or never".to_string()),
+    }
+}
+
 fn parse_priority(value: &str) -> Result<Priority, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "l" | "low" => Ok(Priority::Low),
@@ -314,6 +337,46 @@ fn parse_priority(value: &str) -> Result<Priority, String> {
         "h" | "hi" | "high" => Ok(Priority::High),
         _ => Err("invalid priority: use low|l, medium|m, high|h".to_string()),
     }
+}
+
+fn color_enabled(mode: ColorMode) -> bool {
+    match mode {
+        ColorMode::Always => true,
+        ColorMode::Never => false,
+        ColorMode::Auto => io::stdout().is_terminal(),
+    }
+}
+
+fn paint_ansi(text: &str, code: &str) -> String {
+    format!("\x1b[{code}m{text}\x1b[0m")
+}
+
+fn format_todo_colored(todo: &TodoItem) -> String {
+    let status_plain = if todo.done { "[x]" } else { "[ ]" };
+    let status = if todo.done {
+        paint_ansi(status_plain, "32")
+    } else {
+        paint_ansi(status_plain, "33")
+    };
+
+    let id = paint_ansi(&todo.id.to_string(), "36");
+    let prio_plain = format!("[{}]", todo.priority.short());
+    let prio = match todo.priority {
+        Priority::High => paint_ansi(&prio_plain, "31;1"),
+        Priority::Medium => paint_ansi(&prio_plain, "33"),
+        Priority::Low => paint_ansi(&prio_plain, "34"),
+    };
+
+    let mut out = format!("{status} {id}: {} {prio}", todo.text);
+    if todo.added_at != 0 {
+        out.push(' ');
+        out.push_str(&paint_ansi(&format!("@{}", todo.added_at), "90"));
+    }
+    if let Some(note) = &todo.note {
+        out.push(' ');
+        out.push_str(&paint_ansi(&format!("({note})"), "35"));
+    }
+    out
 }
 
 fn parse_added_at(value: &str) -> Result<i64, String> {

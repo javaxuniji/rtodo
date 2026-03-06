@@ -9,6 +9,9 @@ cargo run -- add "buy milk"
 cargo run -- add -p h --at now "finish report"
 cargo run -- add --priority l --at 1710000000 "walk dog"
 cargo run -- list
+cargo run -- list --color auto    # default
+cargo run -- list --color always  # force colors even when piped
+cargo run -- list --color never   # disable colors
 cargo run -- path              # print current todo storage file path
 cargo run -- done 1
 cargo run -- remove 1          # asks for double confirmation
@@ -18,6 +21,7 @@ cargo run -- clear --yes       # skips confirmation
 ```
 
 `list` 默认按添加时间（added time）正序展示。
+`list` 在终端输出时会用颜色区分状态、优先级与时间（可用 `--color` 控制）。
 
 ### Data storage
 
